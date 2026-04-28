@@ -44,7 +44,7 @@
 
 <div id="header-bar">
     <span>STUDIO MURENA: MUSICAL FIGHTERS</span>
-    <span>ARCADE SYS VER 2.0 (SPRITE EDITION)</span>
+    <span>ARCADE SYS VER 2.1 (FIXED EDITION)</span>
 </div>
 
 <div id="canvas-container">
@@ -64,7 +64,7 @@ ctx.imageSmoothingEnabled = false;
 
 // --- GESTIONE IMMAGINI E ASSET ---
 const spriteData = {
-    idle: { frames: 4, speed: 10 }, // speed: quanti frame del gioco prima di cambiare immagine
+    idle: { frames: 4, speed: 10 },
     walk: { frames: 6, speed: 6 },
     attack: { frames: 5, speed: 5 },
     hurt: { frames: 3, speed: 8 }
@@ -80,28 +80,38 @@ const charactersInfo = [
 
 const images = {};
 let imagesLoaded = 0;
-let totalImages = charactersInfo.length * 4;
+// 20 sprite + 1 sfondo
+let totalImages = (charactersInfo.length * 4) + 1; 
 
-// Caricamento Immagini
+const bgImage = new Image();
+bgImage.src = 'assets/stage.png';
+bgImage.onload = () => imagesLoaded++;
+bgImage.onerror = () => alert("ERRORE: Manca assets/stage.png");
+
+// Caricamento Sprite
 charactersInfo.forEach(char => {
     images[char.id] = {};
     ['idle', 'walk', 'attack', 'hurt'].forEach(anim => {
         let img = new Image();
         img.src = `assets/${char.id}_${anim}.png`;
         img.onload = () => imagesLoaded++;
+        img.onerror = () => console.error("Manca il file: assets/" + char.id + "_" + anim + ".png");
         images[char.id][anim] = img;
     });
 });
 
 // --- VARIABILI GLOBALI ---
-let state = "LOADING"; // LOADING, SELECT, FIGHT, GAMEOVER
+let state = "LOADING"; 
 let frameCounter = 0;
 let p1Index = 0, cpuIndex = 0;
 let p1, cpu;
 let matchTimer = 99;
 const keys = {};
 
-window.addEventListener('keydown', e => { keys[e.code] = true; if(state === "SELECT" || state === "GAMEOVER") handleMenuInput(e.code); });
+window.addEventListener('keydown', e => { 
+    keys[e.code] = true; 
+    if(state === "SELECT" || state === "GAMEOVER") handleMenuInput(e.code); 
+});
 window.addEventListener('keyup', e => keys[e.code] = false);
 
 // --- CLASSE COMBATTENTE ---
@@ -115,17 +125,17 @@ class Fighter {
         this.grounded = true;
         this.facingRight = isP1;
         
-        // Stati animazione
-        this.currentState = 'idle'; // idle, walk, attack, hurt
+        this.currentState = 'idle';
         this.animFrame = 0;
         this.animTimer = 0;
         this.attackHitboxActive = false;
         
-        // Costanti fisiche e rendering
-        this.spriteSize = 128; // La tua griglia originale
-        this.drawScale = 1.8;  // Quanto farli grandi a schermo
-        this.hitboxW = 40;     // Hitbox fisica stretta
+        this.spriteSize = 128; 
+        this.drawScale = 1.8;  
+        this.hitboxW = 40;     
         this.hitboxH = 100;
+        // Floor level adjust
+        this.floorY = 350 - this.hitboxH;
     }
 
     setAnimState(newState) {
@@ -138,53 +148,51 @@ class Fighter {
     }
 
     update() {
-        // Fisica
-        this.vy += 0.8; // Gravità
+        this.vy += 0.8; 
         this.y += this.vy;
         this.x += this.vx;
 
-        if (this.y >= 350 - this.hitboxH) {
-            this.y = 350 - this.hitboxH;
+        if (this.y >= this.floorY) {
+            this.y = this.floorY;
             this.vy = 0; this.grounded = true;
         }
 
-        // Limiti schermo
         if (this.x < 0) this.x = 0;
         if (this.x + this.hitboxW > 800) this.x = 800 - this.hitboxW;
 
-        // Gestione Stati
         let animConf = spriteData[this.currentState];
 
         if (this.currentState === 'hurt') {
             this.vx = 0;
-            if (this.animFrame === animConf.frames - 1 && this.animTimer >= animConf.speed) this.setAnimState('idle');
+            if (this.animFrame === animConf.frames - 1 && this.animTimer >= animConf.speed) {
+                this.setAnimState('idle');
+            }
         } 
         else if (this.currentState === 'attack') {
             this.vx = 0;
-            // Esegui danno solo nel frame centrale dell'animazione
+            // Esegui colpo a metà animazione
             if (this.animFrame === 2 && !this.attackHitboxActive) {
                 this.checkHit();
                 this.attackHitboxActive = true;
             }
-            if (this.animFrame === animConf.frames - 1 && this.animTimer >= animConf.speed) this.setAnimState('idle');
+            if (this.animFrame === animConf.frames - 1 && this.animTimer >= animConf.speed) {
+                this.setAnimState('idle');
+            }
         } 
         else {
-            // Movimento normale
             if (this.vx !== 0 && this.grounded) this.setAnimState('walk');
             else if (this.vx === 0 && this.grounded) this.setAnimState('idle');
         }
 
-        // Avanzamento frame animazione
         this.animTimer++;
         if (this.animTimer >= animConf.speed) {
             this.animTimer = 0;
             this.animFrame++;
-            // Se non è attack o hurt, l'animazione va in loop
             if (this.animFrame >= animConf.frames) {
                 if (this.currentState === 'idle' || this.currentState === 'walk') {
                     this.animFrame = 0;
                 } else {
-                    this.animFrame = animConf.frames - 1; // Fermati all'ultimo frame
+                    this.animFrame = animConf.frames - 1; 
                 }
             }
         }
@@ -196,61 +204,62 @@ class Fighter {
         }
     }
 
-    takeDamage(amount, direction) {
+    takeDamage(amount, pushDirection) {
         if (this.currentState !== 'hurt') {
             this.hp -= amount;
-            this.vy = -5; // Saltello all'indietro
-            this.vx = direction * 5;
+            this.vy = -5; 
+            this.vx = pushDirection * 4;
             this.setAnimState('hurt');
         }
     }
 
     checkHit() {
+        // Se p1 attacca, target è cpu. Viceversa.
         let target = this.isP1 ? cpu : p1;
-        let range = 80; // Quanto in là arriva il colpo (pixel)
+        if (!target) return; // Sicurezza anti-crash
+
+        let range = 60; 
         let attackX = this.facingRight ? this.x + this.hitboxW : this.x - range;
         
-        // Semplice collisione AABB
-        if (!(attackX > target.x + target.hitboxW || attackX + range < target.x || 
-              this.y > target.y + target.hitboxH || this.y + 50 < target.y)) {
+        // Controllo collisione
+        let hit = !(attackX > target.x + target.hitboxW || 
+                    attackX + range < target.x || 
+                    this.y > target.y + target.hitboxH || 
+                    this.y + 50 < target.y);
+
+        if (hit && target.currentState !== 'hurt') {
             target.takeDamage(10, this.facingRight ? 1 : -1);
         }
     }
 
     draw() {
-        // Ombra
         ctx.fillStyle = "rgba(0,0,0,0.5)";
         ctx.beginPath(); ctx.ellipse(this.x + this.hitboxW/2, 350, 30, 6, 0, 0, Math.PI*2); ctx.fill();
 
         let img = images[this.charId][this.currentState];
-        if (!img) return;
+        if (!img || !img.complete) return; // Sicurezza se l'immagine non è pronta
 
         let drawW = this.spriteSize * this.drawScale;
         let drawH = this.spriteSize * this.drawScale;
         
-        // Centratura dello sprite rispetto all'hitbox
         let drawX = this.x - (drawW / 2) + (this.hitboxW / 2);
-        let drawY = this.y - (drawH) + this.hitboxH + 20; // +20 aggiusta i piedi a terra
+        let drawY = this.y - (drawH) + this.hitboxH + 20; 
 
         ctx.save();
         if (!this.facingRight) {
             ctx.translate(drawX + drawW, drawY);
             ctx.scale(-1, 1);
-            drawX = 0; drawY = 0; // Resetta X e Y perché abbiamo traslato l'intero canvas
+            drawX = 0; drawY = 0; 
         }
 
-        // LA MAGIA DEGLI SPRITE!
         ctx.drawImage(
             img, 
-            this.animFrame * this.spriteSize, 0, // Punto di ritaglio su immagine X e Y
-            this.spriteSize, this.spriteSize,    // Grandezza ritaglio
-            drawX, drawY,                        // Posizione a schermo
-            drawW, drawH                         // Grandezza a schermo
+            this.animFrame * this.spriteSize, 0, 
+            this.spriteSize, this.spriteSize,    
+            drawX, drawY,                        
+            drawW, drawH                         
         );
         ctx.restore();
-
-        // DEBUG: de-commenta la riga sotto per vedere i "rettangoli" fisici invisibili
-        // ctx.strokeStyle="red"; ctx.strokeRect(this.x, this.y, this.hitboxW, this.hitboxH);
     }
 }
 
@@ -260,10 +269,15 @@ function handleMenuInput(code) {
         if (code === 'ArrowRight') p1Index = (p1Index + 1) % charactersInfo.length;
         if (code === 'ArrowLeft') p1Index = (p1Index - 1 + charactersInfo.length) % charactersInfo.length;
         if (code === 'Space') {
-            cpuIndex = Math.floor(Math.random() * charactersInfo.length);
+            // Fix Random CPU per evitare cloni e assicurare varietà
+            do {
+                cpuIndex = Math.floor(Math.random() * charactersInfo.length);
+            } while (cpuIndex === p1Index); // Non combatte mai contro se stesso
+
             p1 = new Fighter(200, 200, charactersInfo[p1Index], true);
             cpu = new Fighter(550, 200, charactersInfo[cpuIndex], false);
-            matchTimer = 99; state = "FIGHT";
+            matchTimer = 99; 
+            state = "FIGHT";
         }
     } else if (state === "GAMEOVER" && code === 'Space') {
         state = "SELECT";
@@ -281,48 +295,48 @@ function updateGame() {
         if (frameCounter % 60 === 0 && matchTimer > 0) matchTimer--;
         if (matchTimer <= 0 || p1.hp <= 0 || cpu.hp <= 0) state = "GAMEOVER";
 
-        // Direzione sguardi (solo se non stanno attaccando/morendo)
         if (p1.currentState !== 'attack' && p1.currentState !== 'hurt') p1.facingRight = p1.x < cpu.x;
         if (cpu.currentState !== 'attack' && cpu.currentState !== 'hurt') cpu.facingRight = cpu.x < p1.x;
 
-        // Input Giocatore 1
+        // Input P1
         p1.vx = 0;
         if (p1.currentState !== 'hurt' && p1.currentState !== 'attack') {
             if (keys['ArrowRight']) p1.vx = 5;
             if (keys['ArrowLeft']) p1.vx = -5;
-            if (keys['ArrowUp'] && p1.grounded) { p1.vy = -16; p1.grounded = false; }
+            if (keys['ArrowUp'] && p1.grounded) { p1.vy = -14; p1.grounded = false; }
             if (keys['Space']) p1.attack();
         }
 
-        // IA CPU Base
+        // IA CPU Fixata
         cpu.vx = 0;
         if (cpu.currentState !== 'hurt' && cpu.currentState !== 'attack') {
             let dist = Math.abs(p1.x - cpu.x);
-            if (dist > 70) {
-                cpu.vx = cpu.x > p1.x ? -3 : 3;
-            } else if (Math.random() < 0.05) {
-                cpu.attack();
+            if (dist > 65) {
+                cpu.vx = cpu.x > p1.x ? -3.5 : 3.5;
+            } else {
+                if (Math.random() < 0.04) cpu.attack();
             }
         }
 
-        p1.update(); cpu.update();
+        p1.update(); 
+        cpu.update();
     }
 }
 
 function drawGame() {
-    // Sfondo Base (Modifica qui se vuoi aggiungere un'immagine per lo sfondo!)
-    let grad = ctx.createLinearGradient(0,0,0,450);
-    grad.addColorStop(0, "#1a0b2e"); grad.addColorStop(1, "#36195c");
-    ctx.fillStyle = grad; ctx.fillRect(0,0,800,450);
-    ctx.fillStyle = "#111"; ctx.fillRect(0, 350, 800, 100);
-    ctx.strokeStyle = "#555"; ctx.lineWidth = 3; ctx.strokeRect(0, 350, 800, 1);
+    // Sfondo Stage
+    if (bgImage.complete) {
+        ctx.drawImage(bgImage, 0, 0, 800, 450);
+    } else {
+        ctx.fillStyle = "#000"; ctx.fillRect(0,0,800,450); // Fallback nero
+    }
 
     if (state === "LOADING") {
         ctx.fillStyle = "#fff"; ctx.font = "30px 'Courier New'"; ctx.textAlign = "center";
         ctx.fillText(`CARICAMENTO ASSET... ${Math.floor((imagesLoaded/totalImages)*100)}%`, 400, 225);
     } 
     else if (state === "SELECT") {
-        ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.fillRect(0,0,800,450);
+        ctx.fillStyle = "rgba(0,0,0,0.7)"; ctx.fillRect(0,0,800,450);
         ctx.textAlign = "center"; ctx.fillStyle = "#fff"; ctx.font = "bold 30px 'MS Sans Serif'";
         ctx.fillText("SELECT YOUR MUSICAL FIGHTER", 400, 100);
 
@@ -331,8 +345,7 @@ function drawGame() {
             if (i === p1Index) { ctx.fillStyle = "#ffcc00"; ctx.fillRect(x-5, 195, 100, 100); }
             ctx.fillStyle = "#333"; ctx.fillRect(x, 200, 90, 90);
             
-            // Disegna il frame "idle" come ritratto
-            if (images[char.id].idle) {
+            if (images[char.id] && images[char.id].idle && images[char.id].idle.complete) {
                 ctx.drawImage(images[char.id].idle, 0, 0, 128, 128, x-20, 180, 130, 130);
             }
             ctx.fillStyle = "#fff"; ctx.font = "14px 'MS Sans Serif'"; ctx.fillText(char.name, x+45, 320);
